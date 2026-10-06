@@ -9,6 +9,8 @@ class TruckStop(models.Model):
     state = models.CharField(max_length=2)
     rack_id = models.IntegerField()
     retail_price = models.DecimalField(max_digits=12, decimal_places=8)
+    lat = models.FloatField(null=True, blank=True)
+    lng = models.FloatField(null=True, blank=True)
 
     def __str__(self):
         return self.name
