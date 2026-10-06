@@ -39,6 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'optimal_fuel_route.calculate',
 ]
 
 MIDDLEWARE = [
