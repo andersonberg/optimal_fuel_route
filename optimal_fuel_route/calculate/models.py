@@ -14,3 +14,20 @@ class TruckStop(models.Model):
 
     def __str__(self):
         return self.name
+
+
+class Place(models.Model):
+    """A US city/town from the Census gazetteer, looked up by normalized name."""
+
+    state = models.CharField(max_length=2)
+    key = models.CharField(max_length=100)
+    lat = models.FloatField()
+    lng = models.FloatField()
+
+    class Meta:
+        constraints = [
+            models.UniqueConstraint(fields=['state', 'key'], name='unique_place_state_key'),
+        ]
+
+    def __str__(self):
+        return f'{self.key}, {self.state}'
