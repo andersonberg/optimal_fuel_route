@@ -9,6 +9,7 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from optimal_fuel_route.calculate.locations import geocode_city, normalize_city
 from optimal_fuel_route.calculate.management.commands.import_places import strip_census_suffix
 from optimal_fuel_route.calculate.models import Place, TruckStop
+from optimal_fuel_route.calculate.routing import get_route
 
 
 class NormalizeCityTests(SimpleTestCase):
@@ -204,3 +205,52 @@ class GeocodeTruckstopsTests(TestCase):
         with self.assertRaises(CommandError) as ctx:
             self.run_command()
         self.assertNotIn('test-key', str(ctx.exception))
+
+
+@patch('optimal_fuel_route.calculate.routing.requests.post')
+class GetRouteTests(SimpleTestCase):
+    DALLAS = (32.78, -96.80)
+    CHICAGO = (41.88, -87.63)
+
+    def directions(self):
+        response = Mock()
+        response.json.return_value = {
+            'features': [{
+                'geometry': {'coordinates': [[-96.80, 32.78], [-92.0, 37.0], [-87.63, 41.88]]},
+                'properties': {'summary': {'distance': 967.5}},
+            }]
+        }
+        return response
+
+    def test_returns_lat_lng_points_and_miles(self, mock_post):
+        mock_post.return_value = self.directions()
+
+        coords, miles = get_route(self.DALLAS, self.CHICAGO)
+
+        self.assertEqual(coords, [(32.78, -96.80), (37.0, -92.0), (41.88, -87.63)])
+        self.assertEqual(miles, 967.5)
+
+    def test_sends_lng_lat_pairs_in_miles(self, mock_post):
+        mock_post.return_value = self.directions()
+
+        get_route(self.DALLAS, self.CHICAGO)
+
+        body = mock_post.call_args.kwargs['json']
+        self.assertEqual(body['coordinates'], [[-96.80, 32.78], [-87.63, 41.88]])
+        self.assertEqual(body['units'], 'mi')
+
+    @override_settings(ORS_API_KEY='secret-key')
+    def test_sends_key_in_header_not_url(self, mock_post):
+        mock_post.return_value = self.directions()
+
+        get_route(self.DALLAS, self.CHICAGO)
+
+        kwargs = mock_post.call_args.kwargs
+        self.assertEqual(kwargs['headers'], {'Authorization': 'secret-key'})
+        self.assertNotIn('secret-key', mock_post.call_args.args[0])
+
+    def test_raises_on_http_error(self, mock_post):
+        mock_post.return_value.raise_for_status.side_effect = requests.HTTPError('404 Not Found')
+
+        with self.assertRaises(requests.HTTPError):
+            get_route(self.DALLAS, self.CHICAGO)
