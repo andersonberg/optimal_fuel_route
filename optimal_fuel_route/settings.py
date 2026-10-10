@@ -128,3 +128,9 @@ MAILERS = {
         'BACKEND': 'django.core.mail.backends.console.EmailBackend',
     },
 }
+
+
+# OpenRouteService (geocoding and routing)
+# https://openrouteservice.org/dev/#/api-docs
+
+ORS_API_KEY = os.environ.get('ORS_API_KEY', '')
