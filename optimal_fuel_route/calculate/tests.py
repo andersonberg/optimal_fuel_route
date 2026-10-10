@@ -10,6 +10,7 @@ from optimal_fuel_route.calculate.locations import geocode_city, normalize_city
 from optimal_fuel_route.calculate.management.commands.import_places import strip_census_suffix
 from optimal_fuel_route.calculate.models import Place, TruckStop
 from optimal_fuel_route.calculate.routing import get_route
+from optimal_fuel_route.calculate.stations import find_stops_along_route, haversine_miles
 
 
 class NormalizeCityTests(SimpleTestCase):
@@ -254,3 +255,54 @@ class GetRouteTests(SimpleTestCase):
 
         with self.assertRaises(requests.HTTPError):
             get_route(self.DALLAS, self.CHICAGO)
+
+
+class FindStopsAlongRouteTests(TestCase):
+    # A straight east-west route at 35N from 100W to 90W, a point every 0.1 degree.
+    ROUTE = [(35.0, -100.0 + i / 10) for i in range(101)]
+
+    def make_stop(self, name, lat, lng, price='3.50'):
+        return TruckStop.objects.create(
+            opis_id=1, name=name, address='', city='', state='OK', rack_id=1,
+            retail_price=price, lat=lat, lng=lng,
+        )
+
+    def test_keeps_stops_on_or_near_the_route_and_drops_far_ones(self):
+        self.make_stop('on', 35.0, -95.0)
+        self.make_stop('near', 35.05, -97.0)  # about 3.5 miles north
+        self.make_stop('far', 36.0, -95.0)  # about 69 miles north
+        self.make_stop('outside box', 35.0, -80.0)
+
+        found = find_stops_along_route(self.ROUTE)
+
+        self.assertEqual({stop.name for stop, _, _ in found}, {'on', 'near'})
+
+    def test_mile_marker_is_distance_along_the_route(self):
+        self.make_stop('mid', 35.0, -95.0)
+
+        [(stop, mile, price)] = find_stops_along_route(self.ROUTE)
+
+        self.assertAlmostEqual(mile, haversine_miles(35.0, -100.0, 35.0, -95.0), delta=1)
+
+    def test_returns_price_as_float_sorted_by_mile_marker(self):
+        self.make_stop('later', 35.0, -92.0, price='3.10')
+        self.make_stop('earlier', 35.0, -98.0, price='3.90')
+
+        found = find_stops_along_route(self.ROUTE)
+
+        self.assertEqual([stop.name for stop, _, _ in found], ['earlier', 'later'])
+        self.assertEqual([price for _, _, price in found], [3.9, 3.1])
+        self.assertLess(found[0][1], found[1][1])
+
+    def test_ignores_stops_without_coordinates(self):
+        TruckStop.objects.create(
+            opis_id=2, name='no coords', address='', city='', state='OK', rack_id=1, retail_price='3.50',
+        )
+
+        self.assertEqual(find_stops_along_route(self.ROUTE), [])
+
+    def test_tolerance_is_adjustable(self):
+        self.make_stop('near', 35.1, -97.0)  # about 7 miles north
+
+        self.assertEqual(len(find_stops_along_route(self.ROUTE, tolerance_miles=10)), 1)
+        self.assertEqual(find_stops_along_route(self.ROUTE, tolerance_miles=5), [])
