@@ -6,6 +6,7 @@ import requests
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 
+from optimal_fuel_route.calculate.fuel import FuelPlanError, plan_fuel_stops
 from optimal_fuel_route.calculate.locations import geocode_city, normalize_city
 from optimal_fuel_route.calculate.management.commands.import_places import strip_census_suffix
 from optimal_fuel_route.calculate.models import Place, TruckStop
@@ -306,3 +307,61 @@ class FindStopsAlongRouteTests(TestCase):
 
         self.assertEqual(len(find_stops_along_route(self.ROUTE, tolerance_miles=10)), 1)
         self.assertEqual(find_stops_along_route(self.ROUTE, tolerance_miles=5), [])
+
+
+class PlanFuelStopsTests(SimpleTestCase):
+    # Stations are (stop, mile_marker, price); the planner treats the stop as opaque.
+
+    def test_short_trip_needs_no_fuel_purchase(self):
+        stations = [('near start', 20, 3.00), ('cheaper', 150, 2.00)]
+
+        plan = plan_fuel_stops(stations, total_miles=300)
+
+        self.assertEqual(plan['stops'], [])
+        self.assertEqual(plan['total_gallons'], 0)
+        self.assertEqual(plan['total_cost'], 0)
+
+    def test_short_trip_needs_no_stations_at_all(self):
+        plan = plan_fuel_stops([], total_miles=300)
+
+        self.assertEqual(plan['stops'], [])
+        self.assertEqual(plan['total_cost'], 0)
+
+    def test_long_trip_buys_at_several_stops(self):
+        stations = [('a', 50, 3.00), ('b', 400, 3.20), ('c', 700, 3.10), ('d', 900, 3.30), ('e', 1100, 3.00)]
+
+        plan = plan_fuel_stops(stations, total_miles=1200)
+
+        self.assertEqual([s['stop'] for s in plan['stops']], ['a', 'b', 'c', 'e'])
+        self.assertEqual([round(s['gallons'], 6) for s in plan['stops']], [5, 15, 40, 10])
+        # 5 @ 3.00 + 15 @ 3.20 + 40 @ 3.10 + 10 @ 3.00
+        self.assertAlmostEqual(plan['total_cost'], 15 + 48 + 124 + 30)
+        # The first 500 miles ran on the starting tank, so only the other 700 miles were bought.
+        self.assertAlmostEqual(plan['total_gallons'], 70)
+
+    def test_skips_an_expensive_station(self):
+        stations = [('near start', 10, 3.50), ('expensive', 400, 5.00), ('cheap', 450, 3.00)]
+
+        plan = plan_fuel_stops(stations, total_miles=800)
+
+        self.assertEqual([s['stop'] for s in plan['stops']], ['cheap'])
+        self.assertAlmostEqual(plan['stops'][0]['gallons'], 30)
+        self.assertAlmostEqual(plan['total_cost'], 30 * 3.00)
+
+    def test_never_drives_more_than_the_range_between_stops(self):
+        stations = [(f's{mile}', mile, 3.00 + (mile % 7) / 10) for mile in range(20, 2000, 60)]
+
+        plan = plan_fuel_stops(stations, total_miles=2000)
+
+        marks = [0] + [s['mile'] for s in plan['stops']] + [2000]
+        self.assertTrue(all(b - a <= 500 for a, b in zip(marks, marks[1:])))
+
+    def test_gap_longer_than_the_range_raises(self):
+        stations = [('s', 10, 3.00), ('t', 900, 3.00)]
+
+        with self.assertRaises(FuelPlanError):
+            plan_fuel_stops(stations, total_miles=1500)
+
+    def test_long_trip_with_no_stations_raises(self):
+        with self.assertRaises(FuelPlanError):
+            plan_fuel_stops([], total_miles=1500)
