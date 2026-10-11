@@ -28,7 +28,9 @@ def plan_fuel_stops(stations, total_miles, max_range=500, mpg=10):
     price = float('inf')  # nothing is bought at the start, so any station counts as cheaper
 
     while True:
+        # Find all stations that are reachable within the maximum range a truck can travel.
         reachable = [s for s in stations if position < s[1] <= position + max_range]
+        # Can we reach the finish line from the current position?
         finish_reachable = total_miles - position <= max_range
 
         # Buy just enough to reach the next cheaper station, or the finish if none comes first.

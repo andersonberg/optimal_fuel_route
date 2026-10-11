@@ -365,3 +365,101 @@ class PlanFuelStopsTests(SimpleTestCase):
     def test_long_trip_with_no_stations_raises(self):
         with self.assertRaises(FuelPlanError):
             plan_fuel_stops([], total_miles=1500)
+
+
+@patch('optimal_fuel_route.calculate.views.get_route')
+class RouteEndpointTests(TestCase):
+    DALLAS = (32.78, -96.80)
+    CHICAGO = (41.88, -87.63)
+
+    def setUp(self):
+        Place.objects.create(state='TX', key='dallas', lat=self.DALLAS[0], lng=self.DALLAS[1])
+        Place.objects.create(state='IL', key='chicago', lat=self.CHICAGO[0], lng=self.CHICAGO[1])
+        self.route = [
+            (self.DALLAS[0] + (self.CHICAGO[0] - self.DALLAS[0]) * i / 100,
+             self.DALLAS[1] + (self.CHICAGO[1] - self.DALLAS[1]) * i / 100)
+            for i in range(101)
+        ]
+
+    def add_stop(self, name, fraction, price):
+        lat, lng = self.route[round(fraction * 100)]
+        return TruckStop.objects.create(
+            opis_id=1, name=name, address='I-35', city='X', state='TX', rack_id=1, retail_price=price,
+            lat=lat, lng=lng,
+        )
+
+    def post(self, **body):
+        return self.client.post('/api/route/', body, content_type='application/json')
+
+    def test_returns_route_stops_and_cost(self, mock_get_route):
+        mock_get_route.return_value = (self.route, 800.0)
+        self.add_stop('first', 0.3, '3.10')
+        self.add_stop('second', 0.6, '3.00')
+        self.add_stop('third', 0.9, '3.20')
+
+        response = self.post(start='Dallas, TX', finish='Chicago, IL')
+
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data['distance_miles'], 800.0)
+        # The starting tank covers the first 500 miles, so 300 miles are bought at the cheapest stop.
+        self.assertEqual([s['name'] for s in data['fuel_stops']], ['second'])
+        self.assertEqual(data['fuel_stops'][0]['gallons'], 30.0)
+        self.assertEqual(data['total_gallons'], 30.0)
+        self.assertEqual(data['total_cost'], 90.0)
+
+        features = data['map']['features']
+        self.assertEqual([f['geometry']['type'] for f in features], ['LineString', 'Point'])
+        self.assertEqual(features[0]['geometry']['coordinates'][0], [self.DALLAS[1], self.DALLAS[0]])
+        self.assertEqual(features[1]['properties']['name'], 'second')
+
+    def test_calls_the_routing_service_once_with_resolved_coordinates(self, mock_get_route):
+        mock_get_route.return_value = (self.route, 400.0)
+
+        self.post(start='dallas, tx', finish='Chicago, IL')
+
+        mock_get_route.assert_called_once_with(self.DALLAS, self.CHICAGO)
+
+    def test_trip_within_one_tank_needs_no_stops(self, mock_get_route):
+        mock_get_route.return_value = (self.route, 400.0)
+
+        response = self.post(start='Dallas, TX', finish='Chicago, IL')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['fuel_stops'], [])
+        self.assertEqual(response.json()['total_cost'], 0)
+
+    def test_unknown_city_is_a_400(self, mock_get_route):
+        response = self.post(start='Nowhereville, TX', finish='Chicago, IL')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('start', response.json())
+        mock_get_route.assert_not_called()
+
+    def test_wrong_format_is_a_400(self, mock_get_route):
+        response = self.post(start='Dallas', finish='Chicago, IL')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('start', response.json())
+
+    def test_missing_field_is_a_400(self, mock_get_route):
+        response = self.post(start='Dallas, TX')
+
+        self.assertEqual(response.status_code, 400)
+        self.assertIn('finish', response.json())
+
+    def test_routing_service_failure_is_a_502(self, mock_get_route):
+        mock_get_route.side_effect = requests.HTTPError('401 for url https://api.example/?key=secret')
+
+        response = self.post(start='Dallas, TX', finish='Chicago, IL')
+
+        self.assertEqual(response.status_code, 502)
+        self.assertNotIn('secret', response.content.decode())
+
+    def test_gap_longer_than_the_range_is_a_422(self, mock_get_route):
+        mock_get_route.return_value = (self.route, 800.0)  # no truck stops on the route
+
+        response = self.post(start='Dallas, TX', finish='Chicago, IL')
+
+        self.assertEqual(response.status_code, 422)
+        self.assertIn('detail', response.json())

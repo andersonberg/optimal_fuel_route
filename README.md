@@ -33,3 +33,9 @@ Notes:
 - Safe to re-run: only truck stops without coordinates are updated.
 - Requests are throttled (~0.7s each) to stay inside the free ORS plan limit. If a request fails, progress is kept; re-run later to continue.
 - Run `import_places` first so most cities resolve locally and few ORS requests are needed.
+
+## Route API
+
+`POST /api/route/` with `{"start": "Dallas, TX", "finish": "Chicago, IL"}` returns the driving route, the cheapest fuel stops along it and the total fuel cost. It needs `ORS_API_KEY` and the truck stop data loaded as above.
+
+Note: this is a demo. The endpoint has no authentication or throttling, and every request uses OpenRouteService quota. Add both before exposing it publicly (see the TODO in `RouteView`).
