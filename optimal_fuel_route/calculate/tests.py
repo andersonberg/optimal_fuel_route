@@ -463,3 +463,25 @@ class RouteEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn('detail', response.json())
+
+
+class MapPageTests(SimpleTestCase):
+    def test_renders_the_map_with_the_requested_cities(self):
+        response = self.client.get('/map/', {'start': 'Dallas, TX', 'finish': 'Chicago, IL'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTemplateUsed(response, 'calculate/map.html')
+        self.assertContains(response, 'leaflet')
+        self.assertContains(response, 'id="params"')
+        self.assertContains(response, '"start": "Dallas, TX"')
+
+    def test_renders_without_cities(self):
+        response = self.client.get('/map/')
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, '"start": ""')
+
+    def test_escapes_the_cities_it_embeds(self):
+        response = self.client.get('/map/', {'start': '</script><script>alert(1)</script>', 'finish': 'x'})
+
+        self.assertNotContains(response, '</script><script>alert(1)')

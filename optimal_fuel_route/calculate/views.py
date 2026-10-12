@@ -1,6 +1,7 @@
 import logging
 
 import requests
+from django.views.generic import TemplateView
 from rest_framework import generics, status
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -22,6 +23,20 @@ class TruckStopList(generics.ListCreateAPIView):
 class TruckStopDetail(generics.RetrieveUpdateDestroyAPIView):
     queryset = TruckStop.objects.all()
     serializer_class = TruckStopSerializer
+
+
+class MapView(TemplateView):
+    """A Leaflet page that loads /api/route/ for ?start=City, ST&finish=City, ST and draws it."""
+
+    template_name = 'calculate/map.html'
+
+    def get_context_data(self, **kwargs):
+        context = super().get_context_data(**kwargs)
+        context['params'] = {
+            'start': self.request.GET.get('start', ''),
+            'finish': self.request.GET.get('finish', ''),
+        }
+        return context
 
 
 class RouteView(APIView):

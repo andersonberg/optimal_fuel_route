@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fuel route map</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    html, body { height: 100%; margin: 0; font-family: system-ui, sans-serif; }
+    body { display: flex; flex-direction: column; }
+    #summary { padding: 10px 16px; border-bottom: 1px solid #ccc; }
+    #summary.error { color: #b00020; }
+    #map { flex: 1; }
+  </style>
+</head>
+<body>
+  <div id="summary">Loading route…</div>
+  <div id="map"></div>
+
+  {{ params|json_script:"params" }}
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script>
+    const params = JSON.parse(document.getElementById('params').textContent);
+    const summary = document.getElementById('summary');
+    const map = L.map('map').setView([39.5, -98.35], 4);
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 18,
+      // Django sends Referrer-Policy: same-origin, so tile requests would carry no Referer and OSM blocks them.
+      referrerPolicy: 'strict-origin-when-cross-origin',
+      attribution: '&copy; OpenStreetMap contributors',
+    }).addTo(map);
+
+    function fail(message) {
+      summary.textContent = message;
+      summary.className = 'error';
+    }
+
+    // Stop names come from the database, so build the popup with textContent, not HTML.
+    function stopPopup(properties) {
+      const box = document.createElement('div');
+      const lines = [
+        properties.name,
+        '$' + properties.price.toFixed(3) + ' per gallon',
+        properties.gallons.toFixed(2) + ' gallons, $' + properties.cost.toFixed(2),
+      ];
+      lines.forEach((line, i) => {
+        const el = document.createElement(i === 0 ? 'strong' : 'div');
+        el.textContent = line;
+        box.appendChild(el);
+      });
+      return box;
+    }
+
+    if (!params.start || !params.finish) {
+      fail('Add ?start=Dallas, TX&finish=Chicago, IL to the address.');
+    } else {
+      fetch('/api/route/', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({start: params.start, finish: params.finish}),
+      })
+        .then(response => response.json().then(data => ({ok: response.ok, data})))
+        .then(({ok, data}) => {
+          if (!ok) {
+            // Either {detail: '...'} or {field: ['...']}.
+            return fail(Object.values(data).flat().join(' '));
+          }
+          summary.textContent = params.start + ' to ' + params.finish + ': ' +
+            data.distance_miles + ' miles, ' + data.fuel_stops.length + ' fuel stops, ' +
+            data.total_gallons + ' gallons bought, $' + data.total_cost.toFixed(2);
+
+          const layer = L.geoJSON(data.map, {
+            style: {color: '#1565c0', weight: 4},
+            pointToLayer: (feature, latlng) => L.marker(latlng).bindPopup(stopPopup(feature.properties)),
+          }).addTo(map);
+          map.fitBounds(layer.getBounds());
+        })
+        .catch(() => fail('Could not load the route.'));
+    }
+  </script>
+</body>
+</html>
