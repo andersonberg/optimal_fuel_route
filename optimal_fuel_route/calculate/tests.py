@@ -3,6 +3,7 @@ import tempfile
 from unittest.mock import Mock, patch
 
 import requests
+from django.core.cache import cache
 from django.core.management import CommandError, call_command
 from django.test import SimpleTestCase, TestCase, override_settings
 
@@ -373,6 +374,7 @@ class RouteEndpointTests(TestCase):
     CHICAGO = (41.88, -87.63)
 
     def setUp(self):
+        cache.clear()
         Place.objects.create(state='TX', key='dallas', lat=self.DALLAS[0], lng=self.DALLAS[1])
         Place.objects.create(state='IL', key='chicago', lat=self.CHICAGO[0], lng=self.CHICAGO[1])
         self.route = [
@@ -463,6 +465,32 @@ class RouteEndpointTests(TestCase):
 
         self.assertEqual(response.status_code, 422)
         self.assertIn('detail', response.json())
+
+    def test_repeat_trip_skips_the_routing_service(self, mock_get_route):
+        mock_get_route.return_value = (self.route, 400.0)
+
+        first = self.post(start='Dallas, TX', finish='Chicago, IL')
+        second = self.post(start='dallas, tx', finish='Chicago, IL')
+
+        self.assertEqual(mock_get_route.call_count, 1)
+        self.assertEqual(first.json(), second.json())
+
+    def test_other_trips_are_not_served_from_the_cache(self, mock_get_route):
+        mock_get_route.return_value = (self.route, 400.0)
+
+        self.post(start='Dallas, TX', finish='Chicago, IL')
+        self.post(start='Chicago, IL', finish='Dallas, TX')
+
+        self.assertEqual(mock_get_route.call_count, 2)
+
+    def test_routing_failures_are_not_cached(self, mock_get_route):
+        mock_get_route.side_effect = [requests.HTTPError('503'), (self.route, 400.0)]
+
+        failed = self.post(start='Dallas, TX', finish='Chicago, IL')
+        retried = self.post(start='Dallas, TX', finish='Chicago, IL')
+
+        self.assertEqual(failed.status_code, 502)
+        self.assertEqual(retried.status_code, 200)
 
 
 class MapPageTests(SimpleTestCase):

@@ -1,6 +1,7 @@
 import logging
 
 import requests
+from django.core.cache import cache
 from django.views.generic import TemplateView
 from rest_framework import generics, status
 from rest_framework.response import Response
@@ -13,6 +14,9 @@ from optimal_fuel_route.calculate.serializers import RouteRequestSerializer, Tru
 from optimal_fuel_route.calculate.stations import find_stops_along_route
 
 logger = logging.getLogger(__name__)
+
+# Roads rarely change, so a repeat trip can skip OpenRouteService for a day.
+ROUTE_CACHE_SECONDS = 24 * 60 * 60
 
 
 class TruckStopList(generics.ListCreateAPIView):
@@ -46,15 +50,25 @@ class RouteView(APIView):
         serializer = RouteRequestSerializer(data=request.data)
         serializer.is_valid(raise_exception=True)
 
-        try:
-            coords, miles = get_route(serializer.validated_data['start'], serializer.validated_data['finish'])
-        except requests.RequestException as e:
-            # Log the type and status, not the exception text: requests puts the full URL in the message.
-            status_code = e.response.status_code if e.response is not None else None
-            logger.warning('OpenRouteService directions failed: %s (HTTP status %s)', type(e).__name__, status_code)
-            return Response(
-                {'detail': 'Could not get a route from the routing service.'}, status=status.HTTP_502_BAD_GATEWAY,
-            )
+        start, finish = serializer.validated_data['start'], serializer.validated_data['finish']
+        cache_key = f'route:{start[0]},{start[1]}:{finish[0]},{finish[1]}'
+        cached = cache.get(cache_key)
+        if cached is not None:
+            coords, miles = cached
+        else:
+            try:
+                coords, miles = get_route(start, finish)
+            except requests.RequestException as e:
+                # Log the type and status, not the exception text: requests puts the full URL in the message.
+                status_code = e.response.status_code if e.response is not None else None
+                logger.warning(
+                    'OpenRouteService directions failed: %s (HTTP status %s)', type(e).__name__, status_code,
+                )
+                return Response(
+                    {'detail': 'Could not get a route from the routing service.'},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+            cache.set(cache_key, (coords, miles), ROUTE_CACHE_SECONDS)
 
         try:
             plan = plan_fuel_stops(find_stops_along_route(coords), miles)
