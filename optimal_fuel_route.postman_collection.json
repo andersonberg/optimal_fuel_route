@@ -1,0 +1,49 @@
+{
+  "info": {
+    "name": "Optimal Fuel Route",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [{"key": "base_url", "value": "http://localhost:8000"}],
+  "item": [
+    {
+      "name": "Route: Dallas, TX to Chicago, IL",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"start\": \"Dallas, TX\", \"finish\": \"Chicago, IL\"}"},
+        "url": "{{base_url}}/api/route/"
+      }
+    },
+    {
+      "name": "Route: unknown city (400)",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"start\": \"Nowhereville, TX\", \"finish\": \"Chicago, IL\"}"},
+        "url": "{{base_url}}/api/route/"
+      }
+    },
+    {"name": "Truck stops: list", "request": {"method": "GET", "url": "{{base_url}}/truckstops/"}},
+    {"name": "Truck stops: get one", "request": {"method": "GET", "url": "{{base_url}}/truckstops/1/"}},
+    {
+      "name": "Truck stops: create",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"opis_id\": 1, \"name\": \"Test Stop\", \"address\": \"I-40, EXIT 1\", \"city\": \"Pecos\", \"state\": \"TX\", \"rack_id\": 5, \"retail_price\": \"3.45\"}"},
+        "url": "{{base_url}}/truckstops/"
+      }
+    },
+    {
+      "name": "Truck stops: update price",
+      "request": {
+        "method": "PATCH",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {"mode": "raw", "raw": "{\"retail_price\": \"3.99\"}"},
+        "url": "{{base_url}}/truckstops/1/"
+      }
+    },
+    {"name": "Truck stops: delete", "request": {"method": "DELETE", "url": "{{base_url}}/truckstops/1/"}},
+    {"name": "Map page", "request": {"method": "GET", "url": "{{base_url}}/map/?start=Dallas, TX&finish=Chicago, IL"}}
+  ]
+}
